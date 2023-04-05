@@ -1,3 +1,10 @@
+## New:
+
+*creds.yaml
+*.csv
+data
+
+## Default:
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
