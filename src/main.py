@@ -5,9 +5,9 @@ import openai
 import yaml
 import csv
 
-with open("creds.yaml", "r") as f:
+with open("../configs/creds.yaml", "r") as f:
     creds = yaml.safe_load(f)
-with open("config.yaml", "r") as f:
+with open("../configs/config.yaml", "r") as f:
     config = yaml.safe_load(f)
 
 bot_token = creds["bot_token"]
@@ -23,16 +23,22 @@ openai.api_key = api_key
 messages = {}
 
 # Replace this with the path to your CSV file
-CSV_FILE_PATH = 'users.csv'
+CSV_FILE_PATH = '../data/users.csv'
 
 # Define a function to check if a user is in the CSV database
 async def is_user_in_db(message: types.Message) -> bool:
     with open(CSV_FILE_PATH, newline='') as csvfile:
         reader = csv.DictReader(csvfile)
         for row in reader:
-            if int(row['user_id']) == message.from_user.id or row['user_name'] == message.from_user.username:
+            if row['user_name'] == message.from_user.username: # int(row['user_id']) == message.from_user.id or 
                 return True
     return False
+
+# async def add_user_id(username, user_id):
+#     with open(CSV_FILE_PATH, 'w', newline='') as csvfile:
+#         writer = csv.writer(csvfile, delimiter=',',
+#                             quotechar='|', quoting=csv.QUOTE_MINIMAL)
+#         writer.writerow()
 
 @dp.message_handler(commands=['start'])
 async def start_cmd(message: types.Message):
