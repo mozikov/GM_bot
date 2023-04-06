@@ -1,2 +1,2 @@
 # GM_bot
- AI powered game master for situation puzzles
+ Template for telegram chatbot powered by OpenAI API.
