@@ -63,6 +63,8 @@ async def start_cmd(message: types.Message):
     try:
         
         username = message.from_user.username
+        if username is None:
+            username = str(message.from_user.id)
         messages[username] = []
         USER_IN_DB[username] = await is_user_in_db(message=message)
         if USER_IN_DB[username]:
@@ -96,8 +98,10 @@ async def change_model(message: types.Message):
 @dp.message_handler(commands=["newtopic"])
 async def new_topic_cmd(message: types.Message):
     try:
-        userid = message.from_user.id
-        messages[str(userid)] = []
+        username = message.from_user.username
+        if username is None:
+            username = str(message.from_user.id)
+        messages[username] = []
         await message.reply(
             "Starting a new topic! * * * \n\nНачинаем новую тему! * * *",
             parse_mode="Markdown",
@@ -112,7 +116,7 @@ async def echo_msg(message: types.Message):
         user_message = message.text
         username = message.from_user.username
         if username is None:
-            username = message.from_user.id
+            username = str(message.from_user.id)
         if not await is_user_flag_check(username):
             await message.answer(f"Sorry {username}, you are not signed up or din't log in. Try run /start.")
             return
@@ -122,6 +126,7 @@ async def echo_msg(message: types.Message):
             messages[username] = []
         messages[username].append({"role": "user", "content": user_message})
         # messages[username].append({"role": "system", "content": "prompt"})
+
         cur_time = time.strftime("%d/%m/%Y %H:%M:%S")
         # messages[username].append(
         #     {
