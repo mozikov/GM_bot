@@ -4,7 +4,8 @@ from aiogram import Bot, Dispatcher, executor, types
 import openai
 import yaml
 import csv
-
+from utils import verification
+print('[ + ] Imports done')
 ### Add check on diff levels except of start
 
 with open("configs/creds.yaml", "r") as f:
@@ -26,55 +27,18 @@ messages = {}
 
 # Replace this with the path to your CSV file
 CSV_FILE_PATH = "data/users.csv"
-USER_IN_DB = {}
-
-
-# Define a function to check if a user is in the CSV database
-async def is_user_in_db(message: types.Message) -> bool:
-    with open(CSV_FILE_PATH, newline="") as csvfile:
-        reader = csv.DictReader(csvfile)
-        for row in reader:
-            if (
-                row["user_name"] == message.from_user.username or
-                int(row['user_id']) == message.from_user.id 
-            ):  # int(row['user_id']) == message.from_user.id or
-                return True
-    return False
-
-async def is_user_flag_check(user_name):
-    
-    if user_name in USER_IN_DB.keys():
-        if USER_IN_DB[user_name]:
-            return True
-        else:
-            return False
-    
-
-
-# async def add_user_id(username, user_id):
-#     with open(CSV_FILE_PATH, 'w', newline='') as csvfile:
-#         writer = csv.writer(csvfile, delimiter=',',
-#                             quotechar='|', quoting=csv.QUOTE_MINIMAL)
-#         writer.writerow()
+verified_users = verification.get_verified_users(CSV_FILE_PATH)
 
 
 @dp.message_handler(commands=["start"])
 async def start_cmd(message: types.Message):
     try:
-        
-        username = message.from_user.username
-        if username is None:
-            username = str(message.from_user.id)
-        messages[username] = []
-        USER_IN_DB[username] = await is_user_in_db(message=message)
-        if USER_IN_DB[username]:
+        username = await verification.check_verification(
+            message,
+            verified_users,
+        )
+        if username:
             await message.answer(f"Hello {username}, I'm bot powered on OpenAI API")
-        else:
-            await message.answer(
-                f"Hello {username}, I'm bot powered by OpenAI API. "
-                + "Sorry, the bot is under development and you are not logged in."
-                + "If you want to discuss anything feel free to contact @mozikov"
-            )
     except Exception as e:
         print(e)
         logging.error(f"Error in start_cmd: {e}")
@@ -98,9 +62,13 @@ async def change_model(message: types.Message):
 @dp.message_handler(commands=["newtopic"])
 async def new_topic_cmd(message: types.Message):
     try:
-        username = message.from_user.username
-        if username is None:
-            username = str(message.from_user.id)
+        username = await verification.check_verification(
+            message,
+            verified_users,
+        )
+        if not username:
+            return
+        
         messages[username] = []
         await message.reply(
             "Starting a new topic! * * * \n\nНачинаем новую тему! * * *",
@@ -114,12 +82,16 @@ async def new_topic_cmd(message: types.Message):
 async def echo_msg(message: types.Message):
     try:
         user_message = message.text
-        username = message.from_user.username
-        if username is None:
-            username = str(message.from_user.id)
-        if not await is_user_flag_check(username):
-            await message.answer(f"Sorry {username}, you are not signed up or din't log in. Try run /start.")
+
+        username = await verification.check_verification(
+            message,
+            verified_users,
+        )
+        if not username:
             return
+        # if not await is_user_flag_check(username):
+        #     await message.answer(f"Sorry {username}, you are not signed up or din't log in. Try run /start.")
+        #     return
 
         # Add the user's message to their message history
         if username not in messages:
