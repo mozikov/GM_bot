@@ -24,7 +24,8 @@ def get_verified_users(csv_file_path: str) -> bool:
             
 
 async def check_verification(message: types.Message,
-                             authorized_users: set) -> bool:
+                             authorized_users: set,
+                             ) -> bool:
     user_id = str(message.from_user.id)
     username = message.from_user.username
     if user_id in authorized_users:

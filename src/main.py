@@ -1,11 +1,14 @@
 import logging
 import time
 from aiogram import Bot, Dispatcher, executor, types
+from aiogram.utils.callback_data import CallbackData
 import openai
 import yaml
-import csv
 from utils import verification
 print('[ + ] Imports done')
+
+# Initialize Callback Factory for inline menu buttons
+menu_cb = CallbackData("menu", "button")
 ### Add check on diff levels except of start
 
 with open("configs/creds.yaml", "r") as f:
@@ -24,6 +27,7 @@ dp = Dispatcher(bot)
 openai.api_key = api_key
 
 messages = {}
+prompts = {}
 
 # Replace this with the path to your CSV file
 CSV_FILE_PATH = "data/users.csv"
@@ -47,17 +51,84 @@ async def start_cmd(message: types.Message):
 # No use w/o premium
 @dp.message_handler(commands=["gpt_chair"])
 async def change_model(message: types.Message):
+    pass
+
+@dp.message_handler(commands=["invoke_gm"])
+async def invoke_gm(message: types.Message or types.CallbackQuery):
     try:
-        username = message.from_user.username
-        messages[username] = []
-        if message.text == "mipt1!":
-            # model =
-            pass
+        username = await verification.check_verification(
+                message,
+                verified_users,
+            )
+        if not username:
+            return
+        
+        with open("configs/prompts.yaml", "r") as f:
+            prompts = yaml.safe_load(f)
+        prompts[username] = prompts["grim_gm"] 
+
+        if username not in messages:
+            messages[username] = []
+        messages[username].append({"role": "system", "content": prompts[username]})
+        # if this function is called from menu button it has CallbackQuery
+        # as input and CallbackQuery doesn't have `.reply()` option
+        if isinstance(message, types.CallbackQuery):
+            message = message.message
+
+        await message.reply(
+            "I'm gamemaster now!",
+            parse_mode="Markdown",
+        )
 
     except Exception as e:
-        print(e)
-        logging.error(f"Error in start_cmd: {e}")
+        logging.error(f"Error in invoke_gm: {e}")
 
+### Menu block
+
+
+
+@dp.message_handler(commands=["menu"])
+async def menu_com(message: types.Message):
+    try:
+        username = await verification.check_verification(
+                message,
+                verified_users,
+            )
+        if not username:
+            return
+        
+        buttons = [
+            types.InlineKeyboardButton(text="Subscription",
+                                       callback_data=menu_cb.new(button="subscription")),
+            types.InlineKeyboardButton(text="Start new chat",
+                                       callback_data=menu_cb.new(button="start_chat")),
+            types.InlineKeyboardButton(text="Select prompt",
+                                       callback_data=menu_cb.new(button="select_prompt"))
+        ]
+
+        keyboard = types.InlineKeyboardMarkup(row_width=2)
+        keyboard.add(*buttons)
+        await message.answer("Нажмите на кнопку", reply_markup=keyboard)
+        
+
+    except Exception as e:
+        logging.error(f"Error in invoke_gm: {e}")
+
+@dp.callback_query_handler(menu_cb.filter(button=["subscription", "start_chat", "select_prompt"]))
+async def callbacks_num_change_fab(call: types.CallbackQuery, callback_data: dict):
+    
+    button = callback_data["button"]
+    if button == "subscription":
+        await call.message.reply(
+            "No data yet",
+            parse_mode="Markdown",
+        )
+    if button == "start_chat":
+        await new_topic_cmd(call)
+    if button == "select_prompt":
+        await invoke_gm(call)
+
+###
 
 @dp.message_handler(commands=["newtopic"])
 async def new_topic_cmd(message: types.Message):
@@ -70,8 +141,14 @@ async def new_topic_cmd(message: types.Message):
             return
         
         messages[username] = []
+
+        # if this function is called from menu button it has CallbackQuery
+        # as input and CallbackQuery doesn't have `.reply()` option
+        if isinstance(message, types.CallbackQuery):
+            message = message.message
+
         await message.reply(
-            "Starting a new topic! * * * \n\nНачинаем новую тему! * * *",
+            "Starting a new topic!",
             parse_mode="Markdown",
         )
     except Exception as e:
@@ -89,23 +166,15 @@ async def echo_msg(message: types.Message):
         )
         if not username:
             return
-        # if not await is_user_flag_check(username):
-        #     await message.answer(f"Sorry {username}, you are not signed up or din't log in. Try run /start.")
-        #     return
 
         # Add the user's message to their message history
         if username not in messages:
             messages[username] = []
         messages[username].append({"role": "user", "content": user_message})
-        # messages[username].append({"role": "system", "content": "prompt"})
+
 
         cur_time = time.strftime("%d/%m/%Y %H:%M:%S")
-        # messages[username].append(
-        #     {
-        #         "role": "user",
-        #         "content": f"chat: {message.chat} Сейчас {cur_time} user: {message.from_user.first_name} message: {message.text}",
-        #     }
-        # )
+
         logging.info(f"{username}: {user_message}")
 
         # Check if the message is a reply to the bot's message or a new message
