@@ -4,7 +4,7 @@ from aiogram import Bot, Dispatcher, executor, types
 from aiogram.utils.callback_data import CallbackData
 import openai
 import yaml
-from utils import verification
+from utils import verification, utils
 print('[ + ] Imports done')
 
 # Initialize Callback Factory for inline menu buttons
@@ -26,6 +26,8 @@ dp = Dispatcher(bot)
 
 openai.api_key = api_key
 
+TRANSLATE = False
+util_data = {}
 messages = {}
 prompts = {}
 
@@ -33,6 +35,10 @@ prompts = {}
 CSV_FILE_PATH = "data/users.csv"
 verified_users = verification.get_verified_users(CSV_FILE_PATH)
 
+
+async def init_user(username: str) -> None:
+    messages[username] = []
+    util_data[username] = {"total_tokens": 0}
 
 @dp.message_handler(commands=["start"])
 async def start_cmd(message: types.Message):
@@ -54,7 +60,7 @@ async def change_model(message: types.Message):
     pass
 
 @dp.message_handler(commands=["invoke_gm"])
-async def invoke_gm(message: types.Message or types.CallbackQuery):
+async def invoke_gm(message: types.Message or types.CallbackQuery, prompt_key: str):
     try:
         username = await verification.check_verification(
                 message,
@@ -65,10 +71,10 @@ async def invoke_gm(message: types.Message or types.CallbackQuery):
         
         with open("configs/prompts.yaml", "r") as f:
             prompts = yaml.safe_load(f)
-        prompts[username] = prompts["grim_gm"] 
+        prompts[username] = prompts[prompt_key] 
 
         if username not in messages:
-            messages[username] = []
+            await init_user(username)
         messages[username].append({"role": "system", "content": prompts[username]})
         # if this function is called from menu button it has CallbackQuery
         # as input and CallbackQuery doesn't have `.reply()` option
@@ -76,7 +82,7 @@ async def invoke_gm(message: types.Message or types.CallbackQuery):
             message = message.message
 
         await message.reply(
-            "I'm gamemaster now!",
+            "I'm the gamemaster now!",
             parse_mode="Markdown",
         )
 
@@ -108,14 +114,41 @@ async def menu_com(message: types.Message):
 
         keyboard = types.InlineKeyboardMarkup(row_width=2)
         keyboard.add(*buttons)
-        await message.answer("Нажмите на кнопку", reply_markup=keyboard)
-        
+        await message.answer("Menu:", reply_markup=keyboard)
 
     except Exception as e:
-        logging.error(f"Error in invoke_gm: {e}")
+        logging.error(f"Error in menu_com: {e}")
+
+@dp.message_handler(commands=["select_prompt"])
+async def prompt_com(call: types.CallbackQuery):
+    try:
+        username = await verification.check_verification(
+                call,
+                verified_users,
+            )
+        if not username:
+            return
+        
+        buttons = [
+            types.InlineKeyboardButton(text="Game master [grim]",
+                                       callback_data=menu_cb.new(button="gm_grim")),
+            types.InlineKeyboardButton(text="Game master [light]",
+                                       callback_data=menu_cb.new(button="gm_light")),
+            types.InlineKeyboardButton(text="Translate to Russian",
+                                       callback_data=menu_cb.new(button="translate"))
+        ]
+
+        keyboard = types.InlineKeyboardMarkup(row_width=2)
+        keyboard.add(*buttons)
+        await call.message.answer("Prompts:", reply_markup=keyboard)
+
+    except Exception as e:
+        logging.error(f"Error in prompt_com: {e}")
+
+
 
 @dp.callback_query_handler(menu_cb.filter(button=["subscription", "start_chat", "select_prompt"]))
-async def callbacks_num_change_fab(call: types.CallbackQuery, callback_data: dict):
+async def callbacks_menu_fab(call: types.CallbackQuery, callback_data: dict):
     
     button = callback_data["button"]
     if button == "subscription":
@@ -126,7 +159,21 @@ async def callbacks_num_change_fab(call: types.CallbackQuery, callback_data: dic
     if button == "start_chat":
         await new_topic_cmd(call)
     if button == "select_prompt":
-        await invoke_gm(call)
+        await prompt_com(call)
+
+@dp.callback_query_handler(menu_cb.filter(button=["gm_grim", "gm_light", "translate"]))
+async def callbacks_prompts_fab(call: types.CallbackQuery, callback_data: dict):
+    global TRANSLATE
+    button = callback_data["button"]
+    if button == "gm_grim":
+        await invoke_gm(call, "grim_gm")
+    if button == "gm_light":
+        await invoke_gm(call, "light_gm")
+    if button == "translate":
+        TRANSLATE = not TRANSLATE
+        await call.message.reply(
+            f"Translation: {str(TRANSLATE)} [under dev]",
+        )
 
 ###
 
@@ -140,7 +187,7 @@ async def new_topic_cmd(message: types.Message):
         if not username:
             return
         
-        messages[username] = []
+        await init_user(username)
 
         # if this function is called from menu button it has CallbackQuery
         # as input and CallbackQuery doesn't have `.reply()` option
@@ -169,7 +216,7 @@ async def echo_msg(message: types.Message):
 
         # Add the user's message to their message history
         if username not in messages:
-            messages[username] = []
+            await init_user(username)
         messages[username].append({"role": "user", "content": user_message})
 
 
@@ -194,10 +241,17 @@ async def echo_msg(message: types.Message):
             await bot.send_chat_action(chat_id=message.chat.id, action="typing")
 
             # Generate a response using OpenAI's Chat API
+            num_tokens = await utils.num_tokens_from_messages(messages[username], model)
+
+            while num_tokens >= (4000 - config["max_tokens"]):
+                logging.info(f'context overflow: {num_tokens}')
+                messages[username] = messages[username][1:]
+                num_tokens = await utils.num_tokens_from_messages(messages[username], model)
+
             completion = await openai.ChatCompletion.acreate(
                 model=model,
                 messages=messages[username],
-                max_tokens=2500,
+                max_tokens=config["max_tokens"],
                 temperature=0.7,
                 frequency_penalty=0,
                 presence_penalty=0,
@@ -209,7 +263,7 @@ async def echo_msg(message: types.Message):
             messages[username].append(
                 {"role": "assistant", "content": chatgpt_response["content"]}
             )
-            logging.info(f'ChatGPT response: {chatgpt_response["content"]}')
+            # logging.info(f'ChatGPT response: {chatgpt_response["content"]}')
 
             # Send the bot's response to the user
             await message.reply(chatgpt_response["content"])
@@ -221,6 +275,7 @@ async def echo_msg(message: types.Message):
             )
 
     except Exception as ex:
+        print(ex)
         # If an error occurs, try starting a new topic
         if ex == "context_length_exceeded":
             await message.reply(
